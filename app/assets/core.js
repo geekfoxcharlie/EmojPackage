@@ -6,7 +6,8 @@
   var SETTINGS_KEY = 'emojpack.settings.v1';
 
   var DEFAULT_SETTINGS = {
-    mode: 'smart',
+    layout: '',
+    aspect: true,
     gap: 2,
     corner: 6,
     padding: 2,
@@ -37,16 +38,18 @@
     } catch (e) {}
   }
 
-  var SMART_MAP = {
-    1: [1],
-    2: [2],
-    3: [2, 1],
-    4: [2, 2],
-    5: [2, 2, 1],
-    6: [3, 3],
-    7: [1, 3, 3],
-    8: [2, 3, 3],
-    9: [3, 3, 3]
+  /* 每个张数的可选布局目录（行 → 每行格数），第一个为默认；
+   * 覆盖旧版 smart / grid 两种模式，grid 排布也收录在内 */
+  var LAYOUT_CATALOG = {
+    1: [[1]],
+    2: [[2], [1, 1]],
+    3: [[2, 1], [3], [1, 2], [1, 1, 1]],
+    4: [[2, 2], [1, 3], [3, 1], [2, 1, 1], [1, 1, 1, 1], [4]],
+    5: [[2, 2, 1], [1, 2, 2], [2, 1, 2], [3, 2], [2, 3], [5]],
+    6: [[3, 3], [2, 2, 2], [1, 2, 3], [3, 2, 1], [2, 3, 1], [6]],
+    7: [[1, 3, 3], [3, 3, 1], [3, 1, 3], [2, 3, 2], [2, 2, 3], [3, 2, 2]],
+    8: [[2, 3, 3], [3, 3, 2], [3, 2, 3], [4, 4], [2, 2, 2, 2], [2, 2, 4]],
+    9: [[3, 3, 3], [1, 4, 4], [4, 4, 1], [2, 3, 4], [4, 3, 2], [2, 2, 2, 3]]
   };
 
   function gridRows(n) {
@@ -61,33 +64,86 @@
     return out;
   }
 
-  function rowsFor(count, mode) {
-    if (count <= 0) return [];
-    if (mode === 'grid') return gridRows(count);
-    return SMART_MAP[count] || gridRows(count);
+  function layoutsFor(count) {
+    if (count >= 1 && LAYOUT_CATALOG[count]) return LAYOUT_CATALOG[count];
+    return count > 0 ? [gridRows(count)] : [];
   }
 
-  function layoutCells(count, side, settings) {
-    var cells = [];
-    if (count <= 0) return cells;
-    var rows = rowsFor(count, settings.mode);
-    var pad = side * (settings.padding / 100);
-    var gap = side * (settings.gap / 100);
-    var inner = side - pad * 2;
+  function activeRows(count, settings) {
+    if (count <= 0) return [];
+    var wanted = String(settings.layout || '');
+    var list = layoutsFor(count);
+    if (wanted) {
+      for (var i = 0; i < list.length; i++) {
+        if (list[i].join('-') === wanted) return list[i];
+      }
+    }
+    return list[0];
+  }
+
+  function activeLayoutId(count, settings) {
+    return activeRows(count, settings).join('-');
+  }
+
+  function aspectOf(photo) {
+    if (photo && photo.width && photo.height) {
+      var a = photo.width / photo.height;
+      if (isFinite(a) && a > 0) return a;
+    }
+    return 1;
+  }
+
+  /* 画布只锁宽度，高度随内容：
+   * - 贴合比例：每行行高 = 行可用宽 / Σ(图片宽高比)，格子宽 = 比例 × 行高
+   *   → 每个格子与图片等比，整图零裁切显示
+   * - 等宽方格：行等高、格等宽（旧正方形审美，cover 裁切） */
+  function computeLayout(photos, targetW, settings) {
+    var count = photos.length;
+    if (count <= 0) return { w: targetW, h: targetW, cells: [] };
+    var rows = activeRows(count, settings);
+    var pad = targetW * (settings.padding / 100);
+    var gap = targetW * (settings.gap / 100);
+    var inner = targetW - pad * 2;
+    var adaptive = settings.aspect !== false;
     var rowCount = rows.length;
-    var rowH = (inner - gap * (rowCount - 1)) / rowCount;
-    var y = pad;
+
+    var rowHeights = [];
+    var idx = 0;
     for (var r = 0; r < rowCount; r++) {
       var n = rows[r];
-      var cellW = (inner - gap * (n - 1)) / n;
-      var x = pad;
-      for (var c = 0; c < n; c++) {
-        cells.push({ x: x, y: y, w: cellW, h: rowH });
-        x += cellW + gap;
+      var availW = inner - gap * (n - 1);
+      if (adaptive) {
+        var sum = 0;
+        for (var c = 0; c < n; c++) {
+          sum += aspectOf(photos[idx + c] || photos[count - 1]);
+        }
+        rowHeights.push(availW / sum);
+      } else {
+        rowHeights.push((inner - gap * (rowCount - 1)) / rowCount);
       }
-      y += rowH + gap;
+      idx += n;
     }
-    return cells;
+
+    var totalH = pad * 2 + gap * (rowCount - 1);
+    for (r = 0; r < rowCount; r++) totalH += rowHeights[r];
+
+    var cells = [];
+    idx = 0;
+    var y = pad;
+    for (r = 0; r < rowCount; r++) {
+      var n2 = rows[r];
+      var rh = rowHeights[r];
+      var x = pad;
+      for (var c2 = 0; c2 < n2; c2++) {
+        var photo = photos[idx + c2] || photos[count - 1];
+        var w = adaptive ? aspectOf(photo) * rh : (inner - gap * (n2 - 1)) / n2;
+        cells.push({ x: x, y: y, w: w, h: rh });
+        x += w + gap;
+      }
+      y += rh + gap;
+      idx += n2;
+    }
+    return { w: targetW, h: totalH, cells: cells };
   }
 
   function roundRectPath(ctx, x, y, w, h, r) {
@@ -115,17 +171,50 @@
     return settings.bg === 'transparent';
   }
 
-  function renderTo(canvas, side) {
-    canvas.width = side;
-    canvas.height = side;
-    var ctx = canvas.getContext('2d');
+  var CAPTION_RED = '#E50113';
+  var CAPTION_FONT = '900 {size}px -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif';
+
+  /* 高雅表情包同款：红底白字长条，悬浮在格子底部居中；空文案直接跳过 */
+  function drawCaption(ctx, text, cell) {
+    if (!text) return;
+    var fontSize = Math.min(cell.w, cell.h) * 0.13;
+    var font = function (size) {
+      return CAPTION_FONT.replace('{size}', Math.round(size));
+    };
+    ctx.font = font(fontSize);
+    var maxW = cell.w * 0.9;
+    var w = ctx.measureText(text).width;
+    if (w > maxW) {
+      fontSize = Math.max(6, fontSize * maxW / w);
+      ctx.font = font(fontSize);
+      w = ctx.measureText(text).width;
+    }
+    var padX = fontSize * 0.42;
+    var padY = fontSize * 0.26;
+    var barW = Math.min(cell.w, w + padX * 2);
+    var barH = fontSize + padY * 2;
+    var x = cell.x + (cell.w - barW) / 2;
+    var y = cell.y + cell.h - barH - cell.h * 0.05;
+    ctx.fillStyle = CAPTION_RED;
+    ctx.fillRect(x, y, barW, barH);
+    ctx.fillStyle = '#FFFFFF';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(text, x + barW / 2, y + barH / 2 + fontSize * 0.05);
+  }
+
+  function renderTo(canvas, targetW) {
     var s = state.settings;
-    ctx.clearRect(0, 0, side, side);
+    var lay = computeLayout(state.photos, targetW, s);
+    canvas.width = Math.round(lay.w);
+    canvas.height = Math.round(lay.h);
+    var ctx = canvas.getContext('2d');
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
     if (!isTransparent(s)) {
       ctx.fillStyle = s.bg;
-      ctx.fillRect(0, 0, side, side);
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
     }
-    var cells = layoutCells(state.photos.length, side, s);
+    var cells = lay.cells;
     for (var i = 0; i < cells.length && i < state.photos.length; i++) {
       var cell = cells[i];
       var radius = Math.min(cell.w, cell.h) * (s.corner / 100);
@@ -134,6 +223,7 @@
       ctx.clip();
       drawCover(ctx, state.photos[i].source, cell);
       ctx.restore();
+      drawCaption(ctx, state.photos[i].caption, cell);
     }
     return canvas;
   }
@@ -213,10 +303,13 @@
     MAX_PHOTOS: MAX_PHOTOS,
     EXPORT_SIZE: EXPORT_SIZE,
     state: state,
-    rowsFor: rowsFor,
-    layoutCells: layoutCells,
+    layoutsFor: layoutsFor,
+    activeRows: activeRows,
+    activeLayoutId: activeLayoutId,
+    computeLayout: computeLayout,
     renderTo: renderTo,
     roundRectPath: roundRectPath,
+    drawCaption: drawCaption,
     decodeFile: decodeFile,
     capFor: capFor,
     saveSettings: saveSettings,

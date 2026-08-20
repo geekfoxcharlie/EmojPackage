@@ -53,28 +53,35 @@
 
       <section class="panel">
         <h2 class="step"><span class="step-chip">2</span>摆造型</h2>
-        <div class="ctrl-block">
-          <div class="seg" id="modeSeg" role="radiogroup" aria-label="排版方式">
-            <button type="button" class="seg-btn is-active" data-mode="smart" role="radio" aria-checked="true">智能拼图</button>
-            <button type="button" class="seg-btn" data-mode="grid" role="radio" aria-checked="false">等分网格</button>
+        <div class="layout-picker" id="layoutPicker" hidden></div>
+        <p class="seg-hint" id="modeHint">先装表情，这里会出现可选造型</p>
+        <div class="ctrl-row fit-row">
+          <span class="ctrl-label">比例</span>
+          <div class="seg" id="fitSeg" role="radiogroup" aria-label="格子比例">
+            <button type="button" class="seg-btn is-active" data-aspect="fit" role="radio" aria-checked="true">贴合比例</button>
+            <button type="button" class="seg-btn" data-aspect="even" role="radio" aria-checked="false">等宽方格</button>
           </div>
-          <p class="seg-hint" id="modeHint">按张数自动排出顺眼的组合</p>
         </div>
-        <div class="ctrl-row">
-          <label class="ctrl-label" for="gapRange">间距</label>
-          <input type="range" id="gapRange" min="0" max="8" step="0.5" />
-          <output class="ctrl-out" id="gapOut">2%</output>
-        </div>
-        <div class="ctrl-row">
-          <label class="ctrl-label" for="cornerRange">圆角</label>
-          <input type="range" id="cornerRange" min="0" max="14" step="0.5" />
-          <output class="ctrl-out" id="cornerOut">6%</output>
-        </div>
-        <div class="ctrl-row">
-          <label class="ctrl-label" for="padRange">边距</label>
-          <input type="range" id="padRange" min="0" max="10" step="0.5" />
-          <output class="ctrl-out" id="padOut">2%</output>
-        </div>
+        <details class="fine-tune">
+          <summary>微调：间距 · 圆角 · 边距</summary>
+          <div class="fine-tune-body">
+            <div class="ctrl-row">
+              <label class="ctrl-label" for="gapRange">间距</label>
+              <input type="range" id="gapRange" min="0" max="8" step="0.5" />
+              <output class="ctrl-out" id="gapOut">2%</output>
+            </div>
+            <div class="ctrl-row">
+              <label class="ctrl-label" for="cornerRange">圆角</label>
+              <input type="range" id="cornerRange" min="0" max="14" step="0.5" />
+              <output class="ctrl-out" id="cornerOut">6%</output>
+            </div>
+            <div class="ctrl-row">
+              <label class="ctrl-label" for="padRange">边距</label>
+              <input type="range" id="padRange" min="0" max="10" step="0.5" />
+              <output class="ctrl-out" id="padOut">2%</output>
+            </div>
+          </div>
+        </details>
         <div class="ctrl-row bg-row">
           <span class="ctrl-label">背景</span>
           <div class="bg-chips" id="bgChips">
@@ -116,7 +123,7 @@
             <span class="spinner" aria-hidden="true"></span><span id="previewLoadingText">正在装货…</span>
           </div>
         </div>
-        <p class="format-note" id="formatNote">导出 2160 × 2160 · 白色背景保存为 JPG</p>
+        <p class="format-note" id="formatNote">导出宽 2160 · 高度随内容 · 白色背景保存为 JPG</p>
         <div class="action-bar">
           <button type="button" class="btn btn-primary web-only" id="btnDownload">打包下载</button>
           <button type="button" class="btn btn-ghost web-only" id="btnCopy">复制图片</button>

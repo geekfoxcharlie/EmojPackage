@@ -39,6 +39,9 @@
   var SAMPLE_COUNT = 24;
   var MIN_TICK = 60;
   var MAX_TICK = 100;
+  var GIF_TARGET_BYTES = 1048576;
+  var MIN_EXPORT_W = 340;
+  var MAX_EXPORT_TICK = 140;
 
   function normalizeDelay(cs) {
     var ms = cs * 10;
@@ -251,8 +254,9 @@
     return max;
   }
 
-  /* 按最大源图尺寸推导导出边长：格子刚好容纳源图原生分辨率即可，
-   * 避免无谓放大 —— 放大既多耗像素又引入插值噪声，双双推高体积。 */
+  /* 按最大源图推导导出宽度：让最大图在贴合比例模式下以原生分辨率呈现，
+   * 避免无谓放大 —— 放大既多耗像素又引入插值噪声，双双推高体积。
+   * 高度不锁定，随布局内容伸缩。 */
   function exportSideFor(photos, settings) {
     var maxDim = 0;
     for (var i = 0; i < photos.length; i++) {
@@ -263,23 +267,44 @@
     }
     if (maxDim <= 0) return GIF_EXPORT_SIZE;
 
-    var rows = EP.rowsFor(photos.length, settings.mode);
+    var rows = EP.activeRows(photos.length, settings);
     if (!rows.length) return GIF_EXPORT_SIZE;
 
     var pad = settings.padding / 100;
     var gap = settings.gap / 100;
+    var adaptive = settings.aspect !== false;
     var worst = 1;
+    var idx = 0;
     for (var r = 0; r < rows.length; r++) {
       var n = rows[r];
-      var fw = (1 - 2 * pad - gap * (n - 1)) / n;
-      var fh = (1 - 2 * pad - gap * (rows.length - 1)) / rows.length;
-      var f = Math.min(fw, fh);
+      var f;
+      if (adaptive) {
+        var sum = 0;
+        for (var c = 0; c < n; c++) {
+          var p2 = photos[idx + c] || photos[photos.length - 1];
+          var a = p2.width && p2.height ? p2.width / p2.height : 1;
+          sum += isFinite(a) && a > 0 ? a : 1;
+        }
+        f = (1 - 2 * pad - gap * (n - 1)) / sum;
+      } else {
+        f = (1 - 2 * pad - gap * (n - 1)) / n;
+        var fh = (1 - 2 * pad - gap * (rows.length - 1)) / rows.length;
+        f = Math.min(f, fh);
+      }
       if (f > 0 && f < worst) worst = f;
+      idx += n;
     }
     var side = Math.ceil(maxDim / worst);
-    // 密集组合收紧边长上限：聊天窗口里 600 与 720 肉眼无差，体积差 42%。
+    // 总面积预算：画布高度随内容后，只限宽会让竖版画布像素暴涨；
+    // 面积不超过 宽度上限²（与旧正方形时代等量），竖版自动收窄宽度。
     var cap = photos.length >= 7 ? 600 : photos.length >= 5 ? 640 : GIF_EXPORT_SIZE;
-    return Math.max(360, Math.min(cap, side));
+    side = Math.min(cap, side);
+    var probe = EP.computeLayout(photos, 720, settings);
+    var aspect = probe.h / probe.w;
+    if (aspect > 1) {
+      side = Math.min(side, Math.floor(cap / Math.sqrt(aspect)));
+    }
+    return Math.max(360, side);
   }
 
   /* ---------- 阶段 3：纯函数渲染 ---------- */
@@ -294,18 +319,19 @@
     ctx.drawImage(drawable, cell.x + (cell.w - dw) / 2, cell.y + (cell.h - dh) / 2, dw, dh);
   }
 
-  function renderAt(photos, settings, canvas, side, time) {
-    canvas.width = side;
-    canvas.height = side;
+  function renderAt(photos, settings, canvas, targetW, time) {
+    var lay = EP.computeLayout(photos, targetW, settings);
+    canvas.width = Math.round(lay.w);
+    canvas.height = Math.round(lay.h);
     var ctx = canvas.getContext('2d');
-    ctx.clearRect(0, 0, side, side);
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
     var transparent = settings.bg === 'transparent';
     if (!transparent) {
       ctx.fillStyle = settings.bg;
-      ctx.fillRect(0, 0, side, side);
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
     }
     var t = time || 0;
-    var cells = EP.layoutCells(photos.length, side, settings);
+    var cells = lay.cells;
     for (var i = 0; i < cells.length && i < photos.length; i++) {
       var photo = photos[i];
       var drawable = photo.animated ? photo.frameAt(t) : photo.source;
@@ -317,6 +343,7 @@
       ctx.clip();
       drawCover(ctx, drawable, cell);
       ctx.restore();
+      EP.drawCaption(ctx, photo.caption, cell);
     }
     return canvas;
   }
@@ -385,7 +412,8 @@
     return lut;
   }
 
-  function applyPaletteStable(rgba, lut, transparentIndex) {
+  function applyPaletteStable(rgba, lut, transparentIndex, mask) {
+    var m = mask || 0xFF;
     var n = rgba.length >> 2;
     var index = new Uint8Array(n);
     var hasAlpha = transparentIndex >= 0;
@@ -394,13 +422,14 @@
       if (hasAlpha && rgba[o + 3] < 128) {
         index[i] = transparentIndex;
       } else {
-        index[i] = lut[key565(rgba[o], rgba[o + 1], rgba[o + 2])];
+        index[i] = lut[key565(rgba[o] & m, rgba[o + 1] & m, rgba[o + 2] & m)];
       }
     }
     return index;
   }
 
-  function collectPaletteSamples(photos, settings, side, tick, frameCount, transparent) {
+  function collectPaletteSamples(photos, settings, targetW, tick, frameCount, transparent, mask) {
+    var m = mask || 0xFF;
     var canvas = document.createElement('canvas');
     canvas.width = SAMPLE_SIZE;
     canvas.height = SAMPLE_SIZE;
@@ -408,23 +437,27 @@
     ctx.imageSmoothingQuality = 'high';
 
     var full = document.createElement('canvas');
-    full.width = side;
-    full.height = side;
 
     var sampleCount = Math.min(frameCount, SAMPLE_COUNT);
     var chunks = [];
     for (var s = 0; s < sampleCount; s++) {
       var sampleTime = Math.floor((s / sampleCount) * frameCount) * tick;
-      renderAt(photos, settings, full, side, sampleTime);
+      renderAt(photos, settings, full, targetW, sampleTime);
       ctx.clearRect(0, 0, SAMPLE_SIZE, SAMPLE_SIZE);
       ctx.drawImage(full, 0, 0, SAMPLE_SIZE, SAMPLE_SIZE);
       var data = ctx.getImageData(0, 0, SAMPLE_SIZE, SAMPLE_SIZE).data;
       if (!transparent) {
-        chunks.push(data.subarray(0, data.length));
+        if (m === 0xFF) {
+          chunks.push(data.subarray(0, data.length));
+        } else {
+          var flat = new Uint8Array(data.length);
+          for (var q = 0; q < data.length; q++) flat[q] = data[q] & m;
+          chunks.push(flat);
+        }
       } else {
         var arr = [];
         for (var p = 0; p < data.length; p += 4) {
-          if (data[p + 3] >= 128) arr.push(data[p], data[p + 1], data[p + 2], 255);
+          if (data[p + 3] >= 128) arr.push(data[p] & m, data[p + 1] & m, data[p + 2] & m, 255);
         }
         chunks.push(new Uint8Array(arr));
       }
@@ -439,16 +472,17 @@
     return true;
   }
 
-  async function encodeGif(photos, settings, onProgress) {
-    var side = exportSideFor(photos, settings);
-    var tick = computeTick(photos);
+  async function encodeOnce(photos, settings, targetW, tick, mask, onProgress) {
+    var lay = EP.computeLayout(photos, targetW, settings);
+    var W = Math.max(1, Math.round(lay.w));
+    var H = Math.max(1, Math.round(lay.h));
     var duration = totalDuration(photos);
     var frameCount = Math.max(1, Math.ceil(duration / tick));
     if (frameCount > MAX_EXPORT_FRAMES) frameCount = MAX_EXPORT_FRAMES;
 
     var transparentBg = settings.bg === 'transparent';
 
-    var chunks = collectPaletteSamples(photos, settings, side, tick, frameCount, transparentBg);
+    var chunks = collectPaletteSamples(photos, settings, targetW, tick, frameCount, transparentBg, mask);
     var merged = [];
     for (var c = 0; c < chunks.length; c++) {
       for (var k = 0; k < chunks[c].length; k++) merged.push(chunks[c][k]);
@@ -464,12 +498,12 @@
     var lut = buildStableLUT(palette.slice(0, -1));
 
     var canvas = document.createElement('canvas');
-    canvas.width = side;
-    canvas.height = side;
+    canvas.width = W;
+    canvas.height = H;
     var ctx = canvas.getContext('2d', { willReadFrequently: true });
 
     var encoder = new GIFEncoder();
-    var n = side * side;
+    var n = W * H;
     var diff = new Uint8Array(n);
     var prevWritten = null;
     var pending = null;
@@ -479,7 +513,7 @@
         return { kind: 'full', index: index };
       }
 
-      var minX = side, minY = side, maxX = -1, maxY = -1;
+      var minX = W, minY = H, maxX = -1, maxY = -1;
       var needsErase = false;
       for (var p = 0; p < n; p++) {
         var cur = index[p];
@@ -491,8 +525,8 @@
             needsErase = true;
           }
           diff[p] = cur;
-          var px = p % side;
-          var py = (p - px) / side;
+          var px = p % W;
+          var py = (p - px) / W;
           if (px < minX) minX = px;
           if (px > maxX) maxX = px;
           if (py < minY) minY = py;
@@ -510,7 +544,7 @@
       var h = maxY - minY + 1;
       var patch = new Uint8Array(w * h);
       for (var r = 0; r < h; r++) {
-        var from = (minY + r) * side + minX;
+        var from = (minY + r) * W + minX;
         patch.set(diff.subarray(from, from + w), r * w);
       }
       return { kind: 'diff', index: index, patch: patch, x: minX, y: minY, w: w, h: h };
@@ -519,7 +553,7 @@
     function flushPending() {
       if (!pending) return;
       if (pending.kind === 'full') {
-        encoder.writeFrame(pending.index, side, side, {
+        encoder.writeFrame(pending.index, W, H, {
           palette: palette,
           delay: pending.delay,
           repeat: 0,
@@ -537,7 +571,7 @@
           dispose: 1
         });
       } else {
-        encoder.writeFrame(pending.index, side, side, {
+        encoder.writeFrame(pending.index, W, H, {
           delay: pending.delay,
           transparent: transparentBg,
           transparentIndex: transparentIndex,
@@ -549,9 +583,9 @@
     }
 
     for (var f = 0; f < frameCount; f++) {
-      renderAt(photos, settings, canvas, side, f * tick);
-      var rgba = ctx.getImageData(0, 0, side, side).data;
-      var index = applyPaletteStable(rgba, lut, transparentBg ? transparentIndex : -1);
+      renderAt(photos, settings, canvas, targetW, f * tick);
+      var rgba = ctx.getImageData(0, 0, W, H).data;
+      var index = applyPaletteStable(rgba, lut, transparentBg ? transparentIndex : -1, mask);
 
       if (pending && sameBytes(pending.index, index)) {
         // 静帧：不重复编码，时长攒给下一帧
@@ -569,6 +603,38 @@
 
     encoder.finish();
     return new Blob([encoder.bytesView()], { type: 'image/gif' });
+  }
+
+  /* 1MB 目标自适应：超出时先收窄画布 + 降低帧率（幂律分配），
+   * 几何钳制到头仍超标才逐级启用色彩掩码（0xFF→0xF0→0xE0）压索引熵；
+   * 掩码会带来轻微色带，永远最后 resort。 */
+  async function encodeGif(photos, settings, onProgress) {
+    var w = exportSideFor(photos, settings);
+    var tick = computeTick(photos);
+    var mask = 0xFF;
+    var blob = await encodeOnce(photos, settings, w, tick, mask, onProgress);
+
+    var attempts = 0;
+    while (blob.size > GIF_TARGET_BYTES && attempts < 5) {
+      attempts++;
+      var r = GIF_TARGET_BYTES / blob.size;
+      // 幂律分配：面积承担 55%，帧数承担 45%；
+      // 帧率若已钳制，吃不掉的份额全部转移给画布面积。
+      var frameR = Math.max(Math.pow(r, 0.45), r);
+      var newTick = Math.min(MAX_EXPORT_TICK, Math.round(tick / frameR / 10) * 10);
+      if (newTick < tick) newTick = tick;
+      var actualFrameR = tick / newTick;
+      var areaR = Math.min(1, r / actualFrameR);
+      var newW = Math.max(MIN_EXPORT_W, Math.floor(w * Math.sqrt(areaR)));
+      var stuck = newW === w && newTick === tick;
+      if (stuck && mask === 0xE0) break;
+      w = newW;
+      tick = newTick;
+      if (stuck) mask = mask === 0xFF ? 0xF0 : 0xE0;
+      blob = await encodeOnce(photos, settings, w, tick, mask, onProgress);
+    }
+
+    return blob;
   }
 
   /* ---------- 接入核心 ---------- */

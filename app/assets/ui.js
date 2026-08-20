@@ -10,7 +10,8 @@
     thumbs: document.getElementById('thumbs'),
     btnClear: document.getElementById('btnClear'),
     countLabel: document.getElementById('countLabel'),
-    modeSeg: document.getElementById('modeSeg'),
+    layoutPicker: document.getElementById('layoutPicker'),
+    fitSeg: document.getElementById('fitSeg'),
     modeHint: document.getElementById('modeHint'),
     gapRange: document.getElementById('gapRange'),
     gapOut: document.getElementById('gapOut'),
@@ -27,6 +28,7 @@
     previewEmpty: document.getElementById('previewEmpty'),
     previewLoading: document.getElementById('previewLoading'),
     formatNote: document.getElementById('formatNote'),
+    modal: document.getElementById('modal'),
     toast: document.getElementById('toast')
   };
 
@@ -115,15 +117,14 @@
   function updateFormatNote() {
     var btnCopy = document.getElementById('btnCopy');
     if (EP.hasAnimated()) {
-      var gside = EP.gifExportSide ? EP.gifExportSide() : EP.GIF_EXPORT_SIZE;
       els.formatNote.textContent =
-        '含动图 · 导出 GIF 动图 ' + gside + ' × ' + gside + ' · 无限循环';
+        '含动图 · 导出 GIF 动图 · 自动控制在 1MB 内 · 无限循环';
       if (btnCopy) btnCopy.disabled = true;
     } else {
       var transparent = EP.isTransparent(EP.state.settings);
       var format = transparent ? 'PNG' : 'JPG';
       els.formatNote.textContent =
-        '导出 ' + EP.EXPORT_SIZE + ' × ' + EP.EXPORT_SIZE + ' · 当前背景保存为 ' + format;
+        '导出宽 ' + EP.EXPORT_SIZE + ' · 高度随内容 · 当前背景保存为 ' + format;
       if (btnCopy) btnCopy.disabled = false;
     }
   }
@@ -168,8 +169,125 @@
       }
     });
 
+    var cap = document.createElement('button');
+    cap.type = 'button';
+    cap.className = 'thumb-cap';
+    cap.setAttribute('aria-label', '设置第 ' + (index + 1) + ' 张配文');
+    cap.textContent = '文';
+    cap.addEventListener('click', function () {
+      openCaptionEditor(photo);
+    });
+    thumb.appendChild(cap);
+
+    if (photo.caption) {
+      var captag = document.createElement('span');
+      captag.className = 'thumb-captag';
+      captag.textContent = photo.caption;
+      thumb.appendChild(captag);
+    }
+
     bindDrag(thumb, photo);
     return thumb;
+  }
+
+  function drawCapPreview(canvas, photo, text) {
+    var side = canvas.width;
+    var ctx = canvas.getContext('2d');
+    ctx.clearRect(0, 0, side, side);
+    ctx.fillStyle = '#FFFFFF';
+    ctx.fillRect(0, 0, side, side);
+    var src = photo.animated && photo.frameAt ? photo.frameAt(performance.now()) : photo.source;
+    if (src && src.width) {
+      // contain：完整展示图片，不裁切，配文位置与导出一致
+      var scale = Math.min(side / src.width, side / src.height);
+      var dw = src.width * scale;
+      var dh = src.height * scale;
+      ctx.drawImage(src, (side - dw) / 2, (side - dh) / 2, dw, dh);
+    }
+    EP.drawCaption(ctx, text, { x: 0, y: 0, w: side, h: side });
+  }
+
+  function closeModal() {
+    els.modal.hidden = true;
+    els.modal.innerHTML = '';
+  }
+
+  function openCaptionEditor(photo) {
+    els.modal.innerHTML = '';
+
+    var card = document.createElement('div');
+    card.className = 'modal-card';
+
+    var title = document.createElement('p');
+    title.className = 'modal-title';
+    title.textContent = '给这张表情配个文';
+
+    var preview = document.createElement('canvas');
+    preview.className = 'cap-preview';
+    preview.width = 320;
+    preview.height = 320;
+    preview.setAttribute('role', 'img');
+    preview.setAttribute('aria-label', '配文效果预览');
+    drawCapPreview(preview, photo, photo.caption || '');
+
+    var input = document.createElement('input');
+    input.type = 'text';
+    input.className = 'cap-input';
+    input.maxLength = 14;
+    input.placeholder = '红底白字，留空不显示';
+    input.value = photo.caption || '';
+    input.setAttribute('aria-label', '配文内容');
+
+    var hint = document.createElement('p');
+    hint.className = 'modal-hint';
+    hint.textContent = '最多 14 字 · 每张表情单独设置';
+
+    var actions = document.createElement('div');
+    actions.className = 'modal-actions';
+
+    var btnClear = document.createElement('button');
+    btnClear.type = 'button';
+    btnClear.className = 'btn btn-ghost';
+    btnClear.textContent = '清除配文';
+
+    var btnSave = document.createElement('button');
+    btnSave.type = 'button';
+    btnSave.className = 'btn btn-primary';
+    btnSave.textContent = '保存';
+
+    function save(value) {
+      photo.caption = value;
+      closeModal();
+      refresh();
+    }
+
+    btnClear.addEventListener('click', function () { save(''); });
+    btnSave.addEventListener('click', function () { save(input.value.trim()); });
+    input.addEventListener('input', function () {
+      drawCapPreview(preview, photo, input.value);
+    });
+    input.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter') save(input.value.trim());
+    });
+
+    actions.appendChild(btnClear);
+    actions.appendChild(btnSave);
+
+    var btnClose = document.createElement('button');
+    btnClose.type = 'button';
+    btnClose.className = 'btn btn-ghost modal-close';
+    btnClose.textContent = '取消';
+    btnClose.addEventListener('click', closeModal);
+
+    card.appendChild(title);
+    card.appendChild(preview);
+    card.appendChild(input);
+    card.appendChild(hint);
+    card.appendChild(actions);
+    card.appendChild(btnClose);
+    els.modal.appendChild(card);
+    els.modal.hidden = false;
+    input.focus();
   }
 
   function renderThumbs() {
@@ -181,6 +299,7 @@
 
   function refresh() {
     renderThumbs();
+    renderLayoutPicker();
     requestPreview();
   }
 
@@ -250,7 +369,7 @@
 
     thumb.addEventListener('pointerdown', function (e) {
       if (e.pointerType === 'mouse' && e.button !== 0) return;
-      if (e.target.closest('.thumb-del')) return;
+      if (e.target.closest('.thumb-del, .thumb-cap')) return;
       if (EP.state.photos.length < 2) return;
       startX = e.clientX;
       startY = e.clientY;
@@ -293,13 +412,67 @@
     refresh();
   }
 
+  function renderLayoutPicker() {
+    var s = EP.state.settings;
+    var count = EP.state.photos.length;
+    els.layoutPicker.innerHTML = '';
+    if (!count) {
+      els.layoutPicker.hidden = true;
+      els.modeHint.textContent = '先装表情，这里会出现可选造型';
+      return;
+    }
+    els.layoutPicker.hidden = false;
+    var layouts = EP.layoutsFor(count);
+    var activeId = EP.activeLayoutId(count, s);
+    for (var i = 0; i < layouts.length; i++) {
+      (function (rows) {
+        var id = rows.join('-');
+        var chip = document.createElement('button');
+        chip.type = 'button';
+        chip.className = 'layout-chip' + (id === activeId ? ' is-active' : '');
+        chip.setAttribute('role', 'radio');
+        chip.setAttribute('aria-checked', id === activeId ? 'true' : 'false');
+        chip.setAttribute('aria-label', '布局 ' + rows.join(' 加 '));
+
+        var mini = document.createElement('span');
+        mini.className = 'layout-mini';
+        mini.setAttribute('aria-hidden', 'true');
+        for (var r = 0; r < rows.length; r++) {
+          var row = document.createElement('span');
+          row.className = 'lm-row';
+          for (var c = 0; c < rows[r]; c++) {
+            var cell = document.createElement('i');
+            cell.className = 'lm-cell';
+            row.appendChild(cell);
+          }
+          mini.appendChild(row);
+        }
+        chip.appendChild(mini);
+
+        chip.addEventListener('click', function () {
+          s.layout = id;
+          saveSettingsAndRefresh();
+        });
+        els.layoutPicker.appendChild(chip);
+      })(layouts[i]);
+    }
+    els.modeHint.textContent = count + ' 张 · 当前组合：' + activeId.replace(/-/g, ' + ');
+  }
+
+  function saveSettingsAndRefresh() {
+    EP.saveSettings();
+    renderLayoutPicker();
+    requestPreview();
+  }
+
   function syncControls() {
     var s = EP.state.settings;
-    var buttons = els.modeSeg.querySelectorAll('.seg-btn');
-    for (var i = 0; i < buttons.length; i++) {
-      var active = buttons[i].getAttribute('data-mode') === s.mode;
-      buttons[i].classList.toggle('is-active', active);
-      buttons[i].setAttribute('aria-checked', active ? 'true' : 'false');
+    var fitButtons = els.fitSeg.querySelectorAll('.seg-btn');
+    for (var i = 0; i < fitButtons.length; i++) {
+      var fitValue = fitButtons[i].getAttribute('data-aspect');
+      var active = (fitValue === 'fit') === (s.aspect !== false);
+      fitButtons[i].classList.toggle('is-active', active);
+      fitButtons[i].setAttribute('aria-checked', active ? 'true' : 'false');
     }
     els.gapRange.value = s.gap;
     els.cornerRange.value = s.corner;
@@ -310,9 +483,7 @@
     els.bgColor.value = /^#[0-9a-fA-F]{6}$/.test(s.bg) ? s.bg : '#FFD84D';
     els.customSwatch.style.background = els.bgColor.value;
     syncBgChips(s.bg);
-    els.modeHint.textContent = s.mode === 'smart'
-      ? '按张数自动排出顺眼的组合'
-      : '全部切成一样大的方块';
+    renderLayoutPicker();
   }
 
   function syncBgChips(bg) {
@@ -369,10 +540,10 @@
       toast('已清空，重新装');
     });
 
-    els.modeSeg.addEventListener('click', function (e) {
+    els.fitSeg.addEventListener('click', function (e) {
       var btn = e.target.closest('.seg-btn');
       if (!btn) return;
-      EP.state.settings.mode = btn.getAttribute('data-mode');
+      EP.state.settings.aspect = btn.getAttribute('data-aspect') === 'fit';
       syncControls();
       onSettingChange();
     });
@@ -413,6 +584,10 @@
     } else {
       window.addEventListener('resize', requestPreview);
     }
+
+    els.modal.addEventListener('click', function (e) {
+      if (e.target === els.modal) closeModal();
+    });
   }
 
   document.body.classList.add(IS_XHS ? 'env-xhs' : 'env-web');
