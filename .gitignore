@@ -1,0 +1,14 @@
+# macOS
+.DS_Store
+
+# tooling artifacts
+.playwright-cli/
+.skill/
+
+# export results / archives
+output/
+emoj/
+
+# build artifacts
+minitool-dist/
+test-assets/

@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport"
+        content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+  <title>表情打包机 · 把表情打包成一张诚意大图</title>
+  <meta name="description" content="选几张表情，一键打包成一张组合大图。所有处理都在本机完成，图片不上传。" />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%23FF2E4D'/%3E%3Crect x='11' y='11' width='19' height='19' rx='5' fill='%23fff'/%3E%3Crect x='34' y='11' width='19' height='19' rx='5' fill='%23FFD84D'/%3E%3Crect x='11' y='34' width='19' height='19' rx='5' fill='%23FFD84D'/%3E%3Crect x='34' y='34' width='19' height='19' rx='5' fill='%23fff'/%3E%3C/svg%3E" />
+  <link rel="stylesheet" href="./assets/style.css" />
+</head>
+<body>
+  <header class="masthead">
+    <div class="logo" aria-hidden="true">
+      <svg viewBox="0 0 64 64" width="30" height="30">
+        <rect width="64" height="64" rx="14" fill="#FF2E4D"/>
+        <rect x="11" y="11" width="19" height="19" rx="5" fill="#fff"/>
+        <rect x="34" y="11" width="19" height="19" rx="5" fill="#FFD84D"/>
+        <rect x="11" y="34" width="19" height="19" rx="5" fill="#FFD84D"/>
+        <rect x="34" y="34" width="19" height="19" rx="5" fill="#fff"/>
+      </svg>
+    </div>
+    <div class="masthead-text">
+      <h1>表情打包机</h1>
+      <p class="tagline">散装表情，<mark>打包成一张诚意大图</mark></p>
+    </div>
+  </header>
+
+  <main class="app">
+    <div class="col col-left">
+      <section class="panel">
+        <h2 class="step"><span class="step-chip">1</span>装表情</h2>
+        <p class="step-sub">最多 9 张 · 按住缩略图拖动可调整顺序</p>
+        <label class="dropzone" id="dropzone" for="fileInput">
+          <span class="dz-icon" aria-hidden="true">
+            <svg viewBox="0 0 48 48" width="44" height="44" fill="none">
+              <rect x="6" y="14" width="36" height="28" rx="5" stroke="currentColor" stroke-width="3"/>
+              <path d="M6 20h36" stroke="currentColor" stroke-width="3"/>
+              <path d="M17 10c1.5-4 12.5-4 14 0l1 4H16l1-4z" stroke="currentColor" stroke-width="3" stroke-linejoin="round"/>
+              <path d="M19 30h10" stroke="currentColor" stroke-width="3" stroke-linecap="round"/>
+            </svg>
+          </span>
+          <span class="dz-main">点这里选表情</span>
+          <span class="dz-sub">手机会打开相册 · 电脑可直接拖图 / 粘贴进来</span>
+        </label>
+        <input type="file" id="fileInput" accept="image/*" multiple hidden />
+        <div class="thumbs" id="thumbs" hidden></div>
+        <div class="pick-foot">
+          <span class="count-label" id="countLabel">已装 0 / 9</span>
+          <button type="button" class="link-btn" id="btnClear" hidden>清空重装</button>
+        </div>
+      </section>
+
+      <section class="panel">
+        <h2 class="step"><span class="step-chip">2</span>摆造型</h2>
+        <div class="ctrl-block">
+          <div class="seg" id="modeSeg" role="radiogroup" aria-label="排版方式">
+            <button type="button" class="seg-btn is-active" data-mode="smart" role="radio" aria-checked="true">智能拼图</button>
+            <button type="button" class="seg-btn" data-mode="grid" role="radio" aria-checked="false">等分网格</button>
+          </div>
+          <p class="seg-hint" id="modeHint">按张数自动排出顺眼的组合</p>
+        </div>
+        <div class="ctrl-row">
+          <label class="ctrl-label" for="gapRange">间距</label>
+          <input type="range" id="gapRange" min="0" max="8" step="0.5" />
+          <output class="ctrl-out" id="gapOut">2%</output>
+        </div>
+        <div class="ctrl-row">
+          <label class="ctrl-label" for="cornerRange">圆角</label>
+          <input type="range" id="cornerRange" min="0" max="14" step="0.5" />
+          <output class="ctrl-out" id="cornerOut">6%</output>
+        </div>
+        <div class="ctrl-row">
+          <label class="ctrl-label" for="padRange">边距</label>
+          <input type="range" id="padRange" min="0" max="10" step="0.5" />
+          <output class="ctrl-out" id="padOut">2%</output>
+        </div>
+        <div class="ctrl-row bg-row">
+          <span class="ctrl-label">背景</span>
+          <div class="bg-chips" id="bgChips">
+            <button type="button" class="bg-chip is-active" data-bg="#FFFFFF">
+              <i class="swatch" style="background:#FFFFFF"></i>白
+            </button>
+            <button type="button" class="bg-chip" data-bg="#1A1A1A">
+              <i class="swatch" style="background:#1A1A1A"></i>黑
+            </button>
+            <button type="button" class="bg-chip" data-bg="transparent">
+              <i class="swatch swatch-checker"></i>透明
+            </button>
+            <label class="bg-chip" data-bg="custom" id="customChip">
+              <input type="color" id="bgColor" value="#FFD84D" aria-label="自定义背景色" />
+              <i class="swatch" id="customSwatch" style="background:#FFD84D"></i>自定义
+            </label>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <div class="col col-right">
+      <section class="panel preview-panel">
+        <h2 class="step"><span class="step-chip chip-accent">3</span>打包！</h2>
+        <div class="preview-wrap" id="previewWrap">
+          <canvas id="preview" aria-label="打包预览"></canvas>
+          <div class="preview-empty" id="previewEmpty">
+            <span class="pe-icon" aria-hidden="true">
+              <svg viewBox="0 0 48 48" width="42" height="42" fill="none">
+                <rect x="7" y="15" width="34" height="26" rx="5" stroke="currentColor" stroke-width="3"/>
+                <path d="M24 8v10" stroke="currentColor" stroke-width="3" stroke-linecap="round"/>
+                <circle cx="24" cy="6" r="3" fill="currentColor"/>
+                <path d="M17 26h14M17 32h8" stroke="currentColor" stroke-width="3" stroke-linecap="round"/>
+              </svg>
+            </span>
+            <span>先装点表情进来，这里会展示打包效果</span>
+          </div>
+          <div class="preview-loading" id="previewLoading" hidden>
+            <span class="spinner" aria-hidden="true"></span><span id="previewLoadingText">正在装货…</span>
+          </div>
+        </div>
+        <p class="format-note" id="formatNote">导出 2160 × 2160 · 白色背景保存为 JPG</p>
+        <div class="action-bar">
+          <button type="button" class="btn btn-primary web-only" id="btnDownload">打包下载</button>
+          <button type="button" class="btn btn-ghost web-only" id="btnCopy">复制图片</button>
+          <button type="button" class="btn btn-primary xhs-only" id="btnSaveAlbum">存到相册</button>
+          <button type="button" class="btn btn-ghost xhs-only" id="btnPost">发成笔记</button>
+        </div>
+        <p class="privacy">所有处理都在本机完成，图片不会被上传</p>
+      </section>
+    </div>
+  </main>
+
+  <footer class="foot">表情打包机 · 本地运行 · 不联网不追踪</footer>
+
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+  <div class="modal" id="modal" hidden></div>
+
+  <script src="./assets/vendor/omggif.js"></script>
+  <script src="./assets/vendor/gifenc.js"></script>
+  <script src="./assets/core.js"></script>
+  <script src="./assets/anim.js"></script>
+  <script src="./assets/ui.js"></script>
+  <script src="./assets/share.js"></script>
+</body>
+</html>
